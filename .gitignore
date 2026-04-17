@@ -1,0 +1,11 @@
+# Binaries
+*_bin
+bin/
+vendor/
+
+# OS
+.DS_Store
+*.log
+
+# Go build cache
+cache/
