@@ -1019,3 +1019,54 @@ func TestSolveTDD_OracleFaultPath(t *testing.T) {
 		t.Errorf("Expected 'failed to solve TDD' in error, got %v", err)
 	}
 }
+
+func TestMemory_Save_InvalidPath(t *testing.T) {
+	mem := NewSessionMemory("test goal")
+	err := mem.Save(context.Background(), "/root/nonexistent/memory.json")
+	if err == nil {
+		t.Fatal("expected error for invalid path, got nil")
+	}
+}
+
+func TestPromptAssembler_AssembleReAct_WithLTM(t *testing.T) {
+	assembler := NewPromptAssembler()
+	mem := NewSessionMemory("test goal")
+	mem.ReActSteps = nil
+
+	req, err := assembler.AssembleReAct(context.Background(), "test goal", mem)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(req.UserPrompt, "test goal") {
+		t.Fatalf("expected UserPrompt to contain goal, got %q", req.UserPrompt)
+	}
+}
+
+func TestPromptAssembler_AssembleTDD_NoLessons(t *testing.T) {
+	assembler := NewPromptAssembler()
+	mem := NewSessionMemory("test goal")
+	mem.Lessons = nil
+
+	req, err := assembler.AssembleTDD("test goal", mem)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(req.UserPrompt, "test goal") {
+		t.Fatalf("expected UserPrompt to contain goal, got %q", req.UserPrompt)
+	}
+}
+
+func TestPromptAssembler_AssembleTDD_WithLessons(t *testing.T) {
+	assembler := NewPromptAssembler()
+	mem := NewSessionMemory("test goal")
+	mem.AddLesson("lesson one")
+	mem.AddLesson("lesson two")
+
+	req, err := assembler.AssembleTDD("test goal", mem)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(req.UserPrompt, "lesson one") {
+		t.Fatalf("expected UserPrompt to contain lesson, got %q", req.UserPrompt)
+	}
+}
