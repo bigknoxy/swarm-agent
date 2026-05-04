@@ -682,3 +682,239 @@ func TestSolveReAct_ToolCallContinuesLoop(t *testing.T) {
 		t.Fatalf("expected 2 LLM calls (tool call then solution), got %d", mockLLM.CallCount)
 	}
 }
+
+type switchingJudgeMock struct {
+	CallCount int
+}
+
+func (s *switchingJudgeMock) Evaluate(res *executor.Result, exp judge.Expectation) judge.Verdict {
+	s.CallCount++
+	if s.CallCount >= 2 {
+		return judge.Verdict{IsCorrect: true, Feedback: "ok"}
+	}
+	return judge.Verdict{IsCorrect: false, Feedback: "wrong"}
+}
+
+func (s *switchingJudgeMock) EvaluateTDD(res *executor.Result) judge.Verdict {
+	return judge.Verdict{}
+}
+
+func TestSolveReAct_JudgeRejectsSolution(t *testing.T) {
+	mockLLM := &MockLLM2{
+		Responses: []string{"SOLUTION:\nprint('hello')", "SOLUTION:\nprint('hello')"},
+	}
+	mockJudge := &switchingJudgeMock{}
+	exec := executor.NewExecutor(5 * time.Second)
+	workspace := NewWorkspaceWithPath(t.TempDir())
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, Config{MaxAttempts: 5, Timeout: 5 * time.Second}, &MockCLI{})
+
+	ctx := context.Background()
+	result, err := orch.SolveReAct(ctx, "test goal")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if !strings.Contains(result, "print") {
+		t.Errorf("Expected 'print' in result, got %q", result)
+	}
+	if mockJudge.CallCount != 2 {
+		t.Errorf("Expected judge.CallCount == 2, got %d", mockJudge.CallCount)
+	}
+}
+
+func TestSolveReAct_ExecutionErrorContinues(t *testing.T) {
+	mockLLM := &MockLLM2{
+		Responses: []string{
+			"SOLUTION:\nnot_valid_python!!!",
+			"SOLUTION:\nprint('ok')",
+		},
+	}
+	execJudge := &switchingJudgeMock{}
+	exec := executor.NewExecutor(3 * time.Second)
+	workspace := NewWorkspaceWithPath(t.TempDir())
+	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, execJudge, workspace, cfg, &MockCLI{})
+
+	ctx := context.Background()
+	result, err := orch.SolveReAct(ctx, "write code")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if !strings.Contains(result, "print") {
+		t.Errorf("Expected 'print' in result, got %q", result)
+	}
+}
+
+func TestSolveReAct_DONEWithFilesSucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte("<html/>"), 0644)
+
+	mockLLM := &MockLLM2{
+		Responses: []string{"DONE: wrote index.html"},
+	}
+	mockJudge := &MockJudge2{
+		Verdict: judge.Verdict{IsCorrect: true, Feedback: "ok"},
+	}
+	workspace := NewWorkspaceWithPath(tmpDir)
+	exec := executor.NewExecutor(5 * time.Second)
+	cfg := Config{MaxAttempts: 5, Timeout: 5 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, cfg, &MockCLI{})
+
+	ctx := context.Background()
+	result, err := orch.SolveReAct(ctx, "write html")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if !strings.Contains(result, "wrote index.html") {
+		t.Errorf("Expected 'wrote index.html' in result, got %q", result)
+	}
+}
+
+func TestSolveReAct_LTMInjected(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpScript := filepath.Join(tmpDir, "knowledge_manager.py")
+	os.WriteFile(tmpScript, []byte("#!/usr/bin/env python3\nprint('ltm_context')\n"), 0755)
+
+	t.Setenv("KNOWLEDGE_MANAGER_PATH", tmpScript)
+
+	mockLLM := &MockLLM2{
+		Responses: []string{"SOLUTION:\nprint('hi')"},
+	}
+	mockJudge := &MockJudge2{
+		Verdict: judge.Verdict{IsCorrect: true, Feedback: "ok"},
+	}
+	exec := executor.NewExecutor(3 * time.Second)
+	workspace := NewWorkspaceWithPath(t.TempDir())
+	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, cfg, &MockCLI{})
+
+	ctx := context.Background()
+	_, err := orch.SolveReAct(ctx, "write code")
+
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if mockLLM.CallCount < 1 {
+		t.Errorf("Expected LLM called at least once, got %d", mockLLM.CallCount)
+	}
+}
+
+// TestSolveTDD_TestGenError tests SolveTDD when test generation fails
+func TestSolveTDD_TestGenError(t *testing.T) {
+	mockLLM := &MockLLM2{Error: fmt.Errorf("llm down")}
+	mockJudge := &MockJudge2{}
+	exec := executor.NewExecutor(3 * time.Second)
+	cfg := Config{MaxAttempts: 3, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+
+	ctx := context.Background()
+	_, err := orch.SolveTDD(ctx, "Implement add")
+
+	if err == nil {
+		t.Fatal("Expected error on test generation failure")
+	}
+	if !strings.Contains(err.Error(), "test generation error") {
+		t.Errorf("Expected 'test generation error' in error, got %v", err)
+	}
+}
+
+// firstCallThenErrorLLM implements llm.Provider for testing errors on 2nd+ calls
+type firstCallThenErrorLLM struct {
+	calls int
+	first string
+}
+
+func (m *firstCallThenErrorLLM) Generate(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	m.calls++
+	if m.calls == 1 {
+		return &llm.Response{Text: m.first}, nil
+	}
+	return nil, fmt.Errorf("llm down")
+}
+
+// TestSolveTDD_ArchitectError tests SolveTDD when architect fails after test gen
+func TestSolveTDD_ArchitectError(t *testing.T) {
+	mockLLM := &firstCallThenErrorLLM{first: "assert True"}
+	mockJudge := &MockJudge2{}
+	exec := executor.NewExecutor(3 * time.Second)
+	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+
+	ctx := context.Background()
+	_, err := orch.SolveTDD(ctx, "Implement add")
+
+	if err == nil {
+		t.Fatal("Expected error on architect failure")
+	}
+	if !strings.Contains(err.Error(), "architect error") {
+		t.Errorf("Expected 'architect error' in error, got %v", err)
+	}
+}
+
+// TestSolveTDD_MaxAttemptsExceeded tests SolveTDD when max attempts exhausted
+func TestSolveTDD_MaxAttemptsExceeded(t *testing.T) {
+	mockLLM := &MockLLM2{
+		Responses: []string{
+			"assert True",
+			"HYPOTHESIS: try",
+			"def add(a,b): return a+b",
+			"FAULT: CODE\nANALYSIS: wrong\nLESSON: fix it",
+			"def add(a,b): return a+b+1",
+		},
+	}
+	mockJudge := &MockJudge2{
+		Verdict: judge.Verdict{IsCorrect: false, Feedback: "wrong"},
+	}
+	exec := executor.NewExecutor(3 * time.Second)
+	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+
+	ctx := context.Background()
+	_, err := orch.SolveTDD(ctx, "Implement add")
+
+	if err == nil {
+		t.Fatal("Expected error after max attempts")
+	}
+	if !strings.Contains(err.Error(), "failed to solve TDD") {
+		t.Errorf("Expected 'failed to solve TDD' in error, got %v", err)
+	}
+}
+
+// TestSolveTDD_OracleFaultPath tests test refinement when fault is TEST
+func TestSolveTDD_OracleFaultPath(t *testing.T) {
+	mockLLM := &MockLLM2{
+		Responses: []string{
+			"assert True",
+			"HYPOTHESIS: try",
+			"def add(a,b): return a+b",
+			"FAULT: TEST\nANALYSIS: wrong expected\nLESSON: fix test",
+			"assert add(1,2) == 3",
+		},
+	}
+	mockJudge := &MockJudge2{
+		Verdict: judge.Verdict{IsCorrect: false, Fault: "TEST", Feedback: "wrong"},
+	}
+	exec := executor.NewExecutor(3 * time.Second)
+	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
+
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+
+	ctx := context.Background()
+	_, err := orch.SolveTDD(ctx, "Implement add")
+
+	if err == nil {
+		t.Fatal("Expected error after max attempts")
+	}
+	if !strings.Contains(err.Error(), "failed to solve TDD") {
+		t.Errorf("Expected 'failed to solve TDD' in error, got %v", err)
+	}
+}
