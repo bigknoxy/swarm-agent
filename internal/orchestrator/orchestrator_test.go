@@ -260,6 +260,107 @@ func TestSolveTDD_ReflectorCalled(t *testing.T) {
 	}
 }
 
+// TestWorkspace_ListFiles_WithDirs tests that directories are skipped
+func TestWorkspace_ListFiles_WithDirs(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	// Create a subdirectory
+	subdir := filepath.Join(ws.Root, "subdir")
+	err := os.MkdirAll(subdir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create subdirectory: %v", err)
+	}
+
+	// Write a file in root
+	err = ws.WriteFile("file.txt", "content")
+	if err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	files, err := ws.ListFiles()
+	if err != nil {
+		t.Fatalf("Expected no error listing files, got %v", err)
+	}
+
+	// Should have only one file, not the directory
+	if len(files) != 1 {
+		t.Errorf("Expected 1 file, got %d", len(files))
+	}
+	if files[0] != "file.txt" {
+		t.Errorf("Expected 'file.txt', got %q", files[0])
+	}
+}
+
+// TestWorkspace_ListFiles_EmptyDir tests listing files in empty workspace
+func TestWorkspace_ListFiles_EmptyDir(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	files, err := ws.ListFiles()
+	if err != nil {
+		t.Fatalf("Expected no error listing files, got %v", err)
+	}
+
+	if len(files) != 0 {
+		t.Errorf("Expected empty slice, got %d files", len(files))
+	}
+}
+
+// TestFileTool_Write_MissingContent tests write without content
+func TestFileTool_Write_MissingContent(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	tool := &FileTool{Workspace: ws}
+	ctx := context.Background()
+
+	_, err := tool.Execute(ctx, `{"action":"write","path":"test.txt"}`)
+	if err == nil {
+		t.Fatal("Expected error for missing content")
+	}
+
+	if !strings.Contains(err.Error(), "missing 'content'") {
+		t.Errorf("Expected \"missing 'content'\" in error, got %v", err)
+	}
+}
+
+// TestFileTool_Write_MissingPath tests write without path
+func TestFileTool_Write_MissingPath(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	tool := &FileTool{Workspace: ws}
+	ctx := context.Background()
+
+	_, err := tool.Execute(ctx, `{"action":"write","content":"data"}`)
+	if err == nil {
+		t.Fatal("Expected error for missing path")
+	}
+
+	if !strings.Contains(err.Error(), "missing 'path'") {
+		t.Errorf("Expected \"missing 'path'\" in error, got %v", err)
+	}
+}
+
+// TestFileTool_Read_MissingPath tests read without path
+func TestFileTool_Read_MissingPath(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	tool := &FileTool{Workspace: ws}
+	ctx := context.Background()
+
+	_, err := tool.Execute(ctx, `{"action":"read"}`)
+	if err == nil {
+		t.Fatal("Expected error for missing path")
+	}
+
+	if !strings.Contains(err.Error(), "missing 'path'") {
+		t.Errorf("Expected \"missing 'path'\" in error, got %v", err)
+	}
+}
+
 func TestKnowledgeManagerPath(t *testing.T) {
 	// Create a test file first
 	testPath := "/tmp/test_km.py"
