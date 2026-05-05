@@ -3,8 +3,12 @@ package orchestrator
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"agent_loop/internal/executor"
 )
 
 func TestNewWorkspace(t *testing.T) {
@@ -267,5 +271,97 @@ func TestFileTool_Execute_UnknownAction(t *testing.T) {
 	_, err := tool.Execute(context.Background(), `{"action": "unknown"}`)
 	if err == nil {
 		t.Error("Expected error for unknown action")
+	}
+}
+
+func TestShellTool_Name(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+	if tool.Name() != "shell" {
+		t.Errorf("expected name 'shell', got %q", tool.Name())
+	}
+}
+
+func TestShellTool_Execute_Basic(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	out, err := tool.Execute(context.Background(), `{"command": "echo hello"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Errorf("expected output to contain 'hello', got %q", out)
+	}
+}
+
+func TestShellTool_Execute_InvalidJSON(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	_, err := tool.Execute(context.Background(), `not json`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestShellTool_Execute_MissingCommand(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	_, err := tool.Execute(context.Background(), `{"action": "list"}`)
+	if err == nil {
+		t.Fatal("expected error for missing 'command' field, got nil")
+	}
+}
+
+func TestShellTool_Execute_BlockedPattern(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	_, err := tool.Execute(context.Background(), `{"command": "rm -rf /"}`)
+	if err == nil {
+		t.Fatal("expected error for blocked pattern, got nil")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("expected 'blocked' in error, got %q", err.Error())
+	}
+}
+
+func TestShellTool_Execute_BlockedGitPush(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	_, err := tool.Execute(context.Background(), `{"command": "git push origin main"}`)
+	if err == nil {
+		t.Fatal("expected error for git push, got nil")
+	}
+	if !strings.Contains(err.Error(), "blocked") {
+		t.Errorf("expected 'blocked' in error, got %q", err.Error())
+	}
+}
+
+func TestShellTool_Execute_WorksInWorkspace(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	exec := executor.NewExecutor(2 * time.Second)
+	tool := NewShellTool(exec, ws, 5*time.Second)
+
+	testFile := filepath.Join(ws.Root, "test_file.txt")
+	if err := os.WriteFile(testFile, []byte("hi"), 0644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	out, err := tool.Execute(context.Background(), `{"command": "ls"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "test_file.txt") {
+		t.Errorf("expected output to contain 'test_file.txt', got %q", out)
 	}
 }

@@ -29,8 +29,8 @@ func NewExecutor(timeout time.Duration) *Executor {
 	}
 }
 
-// Run executes a Python script from a string.
-func (e *Executor) RunPython(code string) (*Result, error) {
+// Run executes a Python script from a string with context.
+func (e *Executor) RunPython(ctx context.Context, code string) (*Result, error) {
 	tmpDir := os.TempDir()
 	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("agent_code_%d.py", time.Now().UnixNano()))
 	err := os.WriteFile(tmpFile, []byte(code), 0644)
@@ -38,8 +38,11 @@ func (e *Executor) RunPython(code string) (*Result, error) {
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 	defer os.Remove(tmpFile)
-	ctx, cancel := context.WithTimeout(context.Background(), e.Timeout)
+
+	// Use parent context with timeout
+	ctx, cancel := context.WithTimeout(ctx, e.Timeout)
 	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "python3", tmpFile)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -65,8 +68,46 @@ func (e *Executor) RunPython(code string) (*Result, error) {
 	return result, nil
 }
 
-// RunTDD executes a solution script against a test script in a temporary directory.
-func (e *Executor) RunTDD(solutionCode, testCode string) (*Result, error) {
+// RunShell runs an arbitrary shell command in cwd using bash -c with the given timeout.
+func (e *Executor) RunShell(ctx context.Context, command string, cwd string, timeout time.Duration) (*Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+	result := &Result{Stdout: buf.String()}
+	if ctx.Err() == context.DeadlineExceeded {
+		result.Status = "timeout"
+		result.ExitCode = 124
+		result.Stdout += fmt.Sprintf("\nexit_code: %d", result.ExitCode)
+		return result, nil
+	}
+	if err != nil {
+		result.Status = "failed"
+		if exitError, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitError.ExitCode()
+		} else {
+			result.ExitCode = 1
+		}
+		result.Stdout += fmt.Sprintf("\nexit_code: %d", result.ExitCode)
+		return result, nil
+	}
+	result.Status = "success"
+	result.ExitCode = 0
+	result.Stdout += fmt.Sprintf("\nexit_code: %d", result.ExitCode)
+	return result, nil
+}
+
+// RunTDD executes a solution script against a test script in a temporary directory with context.
+func (e *Executor) RunTDD(ctx context.Context, solutionCode, testCode string) (*Result, error) {
 	tmpDir, err := os.MkdirTemp("", "agent_tdd_")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tmp dir: %w", err)
@@ -80,8 +121,11 @@ func (e *Executor) RunTDD(solutionCode, testCode string) (*Result, error) {
 	if err := os.WriteFile(testPath, []byte(testCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write test file: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), e.Timeout)
+
+	// Use parent context with timeout
+	ctx, cancel := context.WithTimeout(ctx, e.Timeout)
 	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "python3", "verify.py")
 	cmd.Dir = tmpDir
 	var stdout, stderr bytes.Buffer

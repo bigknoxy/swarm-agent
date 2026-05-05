@@ -148,7 +148,7 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 		)
 
 		req := llm.Request{
-			SystemPrompt: "You are a coding agent. Solve tasks step by step.\n\nRules:\n- Start every response with a brief Thought.\n- If the goal says 'write <filename>' or 'create <filename>': ALWAYS use the filesystem tool to write the file, then output DONE: <summary>. Never use SOLUTION: for file-creation goals.\n- filesystem tool format: Action: filesystem\\nAction Input: {\"action\":\"write\",\"path\":\"<filename>\",\"content\":\"<content>\"}\n- File content must never contain the literal words SOLUTION: or DONE:.\n- Only use SOLUTION: <code> when the goal asks you to compute or verify something without creating a persistent file.",
+			SystemPrompt: "You are a coding agent. Solve tasks step by step.\n\nRules:\n- Start every response with a brief Thought.\n- If the goal says 'write <filename>' or 'create <filename>': ALWAYS use the filesystem tool to write the file, then output DONE: <summary>. Never use SOLUTION: for file-creation goals.\n- filesystem tool format: Action: filesystem\\nAction Input: {\"action\":\"write\",\"path\":\"<filename>\",\"content\":\"<content>\"}\n- File content must never contain the literal words SOLUTION: or DONE:.\n- Only use SOLUTION: <code> when the goal asks you to compute or verify something without creating a persistent file.\n- To run shell commands (npm install, go build, go test, pip install, pytest, cargo build, make): use the shell tool.\n- shell tool format: Action: shell\\nAction Input: {\"command\": \"<command>\"}\n- The shell tool runs commands in the workspace directory. Use it to verify your code works after writing files.",
 			UserPrompt:   prompt,
 		}
 

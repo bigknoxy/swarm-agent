@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"agent_loop/internal/executor"
 )
 
 // Workspace represents a strictly isolated directory for the agent
@@ -157,4 +160,61 @@ func (f *FileTool) Execute(ctx context.Context, arg string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown action: %s", action)
 	}
+}
+
+// --- ShellTool ---
+
+var destructivePatterns = []string{
+	"rm -rf /", "rm -rf ~",
+	"curl | bash", "curl|bash",
+	"wget | sh", "wget|sh",
+	"git push",
+	"chmod 777",
+	":(){:|:&};:",
+}
+
+type ShellTool struct {
+	Exec      *executor.Executor
+	Workspace *Workspace
+	Timeout   time.Duration
+}
+
+func NewShellTool(exec *executor.Executor, ws *Workspace, timeout time.Duration) *ShellTool {
+	return &ShellTool{Exec: exec, Workspace: ws, Timeout: timeout}
+}
+
+func (s *ShellTool) Name() string { return "shell" }
+
+func (s *ShellTool) Description() string {
+	return `Run a shell command in the workspace directory.
+Input: {"command": "npm install"}
+Output: stdout+stderr combined with exit code.
+Timeout: 5m default. Working directory: workspace root.
+Use for: go build, go test, npm install, node app.js, pip install, pytest, cargo build, make.
+Do NOT use for: writing files (use filesystem tool), running Python snippets (use python_repl).
+Blocked patterns: rm -rf /, curl | bash, git push, wget | sh, chmod 777.`
+}
+
+func (s *ShellTool) Execute(ctx context.Context, arg string) (string, error) {
+	var args map[string]string
+	if err := json.Unmarshal([]byte(arg), &args); err != nil {
+		return "", fmt.Errorf("invalid JSON: %w", err)
+	}
+	command, ok := args["command"]
+	if !ok {
+		return "", fmt.Errorf("missing 'command' field")
+	}
+	for _, p := range destructivePatterns {
+		if strings.Contains(command, p) {
+			return "", fmt.Errorf("blocked: command matches destructive pattern %q", p)
+		}
+	}
+	result, err := s.Exec.RunShell(ctx, command, s.Workspace.Root, s.Timeout)
+	if err != nil {
+		return "", err
+	}
+	if result.Status == "timeout" {
+		return fmt.Sprintf("Command '%s' timed out after %s. Last output:\n%s", command, s.Timeout, result.Stdout), nil
+	}
+	return result.Stdout, nil
 }
