@@ -1094,3 +1094,41 @@ func TestPromptAssembler_AssembleTDD_WithLessons(t *testing.T) {
 		t.Fatalf("expected UserPrompt to contain lesson, got %q", req.UserPrompt)
 	}
 }
+
+func TestListFiles_RecursiveSubdirectory(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+
+	if err := ws.WriteFile("root.py", "x=1"); err != nil {
+		t.Fatalf("WriteFile(root.py) failed: %v", err)
+	}
+	if err := ws.WriteFile("src/module.py", "y=2"); err != nil {
+		t.Fatalf("WriteFile(src/module.py) failed: %v", err)
+	}
+
+	files, err := ws.ListFiles()
+	if err != nil {
+		t.Fatalf("ListFiles() failed: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
+	}
+
+	foundRoot := false
+	foundSrcModule := false
+	for _, f := range files {
+		if f == "root.py" {
+			foundRoot = true
+		}
+		if f == "src/module.py" {
+			foundSrcModule = true
+		}
+	}
+
+	if !foundRoot {
+		t.Error("expected 'root.py' in returned files")
+	}
+	if !foundSrcModule {
+		t.Error("expected 'src/module.py' in returned files")
+	}
+}

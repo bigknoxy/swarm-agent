@@ -125,15 +125,18 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 	// Load prior session if it exists (lessons persist across runs)
 	_ = mem.Load(ctx, "session_memory.json")
 
-	for attempt := 1; attempt <= o.config.MaxAttempts; attempt++ {
-		o.cli.PrintInfo(fmt.Sprintf("--- ReAct Attempt %d (%s) ---", attempt, goal))
-		
-		// LTM Injection
+	// Query LTM once before the loop (not per-attempt). Skip for short goals — they
+	// rarely have useful LTM hits and the keyword-gen LLM call adds ~7s overhead.
+	ltmSection := ""
+	if len(goal) >= 120 {
 		ltmPatterns := o.queryLTM(ctx, goal)
-		ltmSection := ""
 		if ltmPatterns != "" {
 			ltmSection = fmt.Sprintf("\n### RELEVANT PATTERNS FROM LONG-TERM MEMORY ###\n%s\n", ltmPatterns)
 		}
+	}
+
+	for attempt := 1; attempt <= o.config.MaxAttempts; attempt++ {
+		o.cli.PrintInfo(fmt.Sprintf("--- ReAct Attempt %d (%s) ---", attempt, goal))
 
 		// 1. Build the prompt with the full ReAct history and Lessons
 		historyLog := mem.GetLog()
