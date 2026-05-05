@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,20 +68,24 @@ func (w *Workspace) ReadFile(filename string) (string, error) {
 	return string(content), nil
 }
 
-// ListFiles lists all files in the workspace
+// ListFiles lists all files in the workspace, recursing into subdirectories.
 func (w *Workspace) ListFiles() ([]string, error) {
-	entries, err := os.ReadDir(w.Root)
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	var files []string
+	err := filepath.WalkDir(w.Root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		names = append(names, e.Name())
-	}
-	return names, nil
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(w.Root, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, rel)
+		return nil
+	})
+	return files, err
 }
 
 // Clean removes the workspace directory
