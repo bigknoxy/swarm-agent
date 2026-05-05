@@ -361,6 +361,30 @@ func TestFileTool_Read_MissingPath(t *testing.T) {
 	}
 }
 
+// TestFileTool_SingleQuoteEscapeInJSON verifies that \' in LLM-generated JSON is handled gracefully.
+func TestFileTool_SingleQuoteEscapeInJSON(t *testing.T) {
+	ws := NewWorkspaceWithPath(t.TempDir())
+	defer ws.Clean()
+
+	tool := &FileTool{Workspace: ws}
+	ctx := context.Background()
+
+	// LLMs emit \'...\' instead of '...' inside JSON strings; this should not fail.
+	arg := `{"action":"write","path":"test.py","content":"if x in \'+-*/\':\n    pass\n"}`
+	_, err := tool.Execute(ctx, arg)
+	if err != nil {
+		t.Fatalf("Expected single-quote escape to be handled, got error: %v", err)
+	}
+
+	content, err := ws.ReadFile("test.py")
+	if err != nil {
+		t.Fatalf("Could not read written file: %v", err)
+	}
+	if !strings.Contains(content, "'+-*/'") {
+		t.Errorf("Expected single quotes in file content, got: %q", content)
+	}
+}
+
 func TestKnowledgeManagerPath(t *testing.T) {
 	// Create a test file first
 	testPath := "/tmp/test_km.py"
