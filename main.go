@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"agent_loop/internal/config"
@@ -26,8 +28,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  swarm --role developer --verbose \"implement the auth module\"\n")
 		fmt.Fprintf(os.Stderr, "  swarm --project /path/to/repo \"refactor the auth module\"\n")
 		fmt.Fprintf(os.Stderr, "  swarm --json \"write hello.py\" | jq .\n\n")
+		fmt.Fprintf(os.Stderr, "Fix mode (pipe compiler errors):\n")
+		fmt.Fprintf(os.Stderr, "  go build ./... 2>&1 | swarm fix\n")
+		fmt.Fprintf(os.Stderr, "  npm run build 2>&1 | swarm fix\n")
+		fmt.Fprintf(os.Stderr, "  swarm fix < errors.txt\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
+	}
+
+	var fixMode bool
+	var fixGoal string
+
+	// Detect 'fix' subcommand before flag parsing
+	if len(os.Args) > 1 && os.Args[1] == "fix" {
+		fixMode = true
+		os.Args = append(os.Args[:1], os.Args[2:]...)
 	}
 
 	configPath := flag.String("config", "", "Path to config file (default: ~/.swarm/config.json)")
@@ -47,9 +62,34 @@ func main() {
 		os.Exit(0)
 	}
 
-	if len(flag.Args()) == 0 {
+	if len(flag.Args()) == 0 && !fixMode {
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	// fix mode: read stdin and build goal from compiler errors
+	if fixMode {
+		stdinBytes, err := io.ReadAll(os.Stdin)
+		if err != nil || len(stdinBytes) == 0 {
+			fmt.Fprintln(os.Stderr, "swarm fix: no input on stdin. Usage: go build 2>&1 | swarm fix")
+			os.Exit(1)
+		}
+		errorText := strings.TrimSpace(string(stdinBytes))
+
+		// Detect build tool from error format to add verification hint
+		verifyHint := ""
+		switch {
+		case strings.Contains(errorText, ".go:") || strings.Contains(errorText, "go build"):
+			verifyHint = " After fixing, run 'go build ./...' to verify."
+		case strings.Contains(errorText, "npm") || strings.Contains(errorText, "node_modules"):
+			verifyHint = " After fixing, run 'npm run build' to verify."
+		case strings.Contains(errorText, "Traceback") || strings.Contains(errorText, "SyntaxError"):
+			verifyHint = " After fixing, run 'python3 -m pytest' or re-run the script to verify."
+		case strings.Contains(errorText, "error[E") || strings.Contains(errorText, "cargo"):
+			verifyHint = " After fixing, run 'cargo build' to verify."
+		}
+
+		fixGoal = "Fix these build/compiler errors in the source files:\n\n" + errorText + "\n\nFix the errors in the relevant source files." + verifyHint
 	}
 
 	// Create CLI output handler
@@ -71,6 +111,13 @@ func main() {
 	}
 	if *workspaceFlag != "" {
 		cfg.Workspace = *workspaceFlag
+	}
+
+	// In fix mode, default workspace to CWD so writes land in the real project
+	if fixMode && cfg.Workspace == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			cfg.Workspace = cwd
+		}
 	}
 
 	projectDir := *projectFlag
@@ -102,7 +149,12 @@ func main() {
 	orch.RegisterTool(fileTool)
 	orch.RegisterTool(shellTool)
 
-	goal := flag.Args()[0]
+	var goal string
+	if fixMode {
+		goal = fixGoal
+	} else {
+		goal = flag.Args()[0]
+	}
 
 	if *roleFlag != "" {
 		roleCfg, err := roles.GetRoleConfig(*roleFlag)
