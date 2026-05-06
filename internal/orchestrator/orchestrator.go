@@ -125,30 +125,39 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 	// Load prior session if it exists (lessons persist across runs)
 	_ = mem.Load(ctx, "session_memory.json")
 
-	// Query LTM once before the loop (not per-attempt). Skip for short goals — they
-	// rarely have useful LTM hits and the keyword-gen LLM call adds ~7s overhead.
+	// Query LTM once before the loop (not per-attempt).
 	ltmSection := ""
-	if len(goal) >= 120 {
+	if len(goal) >= 10 {
 		ltmPatterns := o.queryLTM(ctx, goal)
 		if ltmPatterns != "" {
 			ltmSection = fmt.Sprintf("\n### RELEVANT PATTERNS FROM LONG-TERM MEMORY ###\n%s\n", ltmPatterns)
 		}
 	}
 
+	// Build project context once before the loop — git status, file structure, relevant files, top file snippet
+	projCtx, _ := BuildContext(goal, o.workspace.Root, o.exec, o.workspace)
+	if summary := ContextScanSummary(projCtx); summary != "" {
+		o.cli.PrintInfo(summary)
+	}
+	ctxSection := ""
+	if projCtx != nil {
+		ctxSection = projCtx.Format()
+	}
+
 	for attempt := 1; attempt <= o.config.MaxAttempts; attempt++ {
-		o.cli.PrintInfo(fmt.Sprintf("--- ReAct Attempt %d (%s) ---", attempt, goal))
+		o.cli.PrintInfo(fmt.Sprintf("Attempt %d/%d — thinking...", attempt, o.config.MaxAttempts))
 
 		// 1. Build the prompt with the full ReAct history and Lessons
 		historyLog := mem.GetLog()
 		prompt := fmt.Sprintf("Goal: %s\n\n### Context\n%s\n\n### Tools\n%s\n\n### History\n%s\n\n### Instructions\n- Analyze the goal and history.\n- Use tools when needed (Action: <tool>\\nAction Input: <json>).\n- For Python/script tasks: output SOLUTION: followed by the code on the next line.\n- For file-creation tasks (HTML, CSS, configs): use the filesystem tool to write files, then output DONE: followed by a summary.\n\nThought:",
 			mem.Goal,
-			ltmSection,
+			ltmSection+ctxSection,
 			o.tools.GetToolsSummary(),
 			historyLog,
 		)
 
 		req := llm.Request{
-			SystemPrompt: "You are a coding agent. Solve tasks step by step.\n\nRules:\n- Start every response with a brief Thought.\n- If the goal says 'write <filename>' or 'create <filename>': ALWAYS use the filesystem tool to write the file, then output DONE: <summary>. Never use SOLUTION: for file-creation goals.\n- filesystem tool format: Action: filesystem\\nAction Input: {\"action\":\"write\",\"path\":\"<filename>\",\"content\":\"<content>\"}\n- File content must never contain the literal words SOLUTION: or DONE:.\n- Only use SOLUTION: <code> when the goal asks you to compute or verify something without creating a persistent file.\n- To run shell commands (npm install, go build, go test, pip install, pytest, cargo build, make): use the shell tool.\n- shell tool format: Action: shell\\nAction Input: {\"command\": \"<command>\"}\n- The shell tool runs commands in the workspace directory. Use it to verify your code works after writing files.",
+			SystemPrompt: "You are a coding agent. Solve tasks step by step.\n\nRules:\n- Start every response with a brief Thought.\n- If the goal says 'write <filename>' or 'create <filename>': ALWAYS use the filesystem tool to write the file, then output DONE: <summary>. Never use SOLUTION: for file-creation goals.\n- filesystem tool format: Action: filesystem\\nAction Input: {\"action\":\"write\",\"path\":\"<filename>\",\"content\":\"<content>\"}\n- File content must never contain the literal words SOLUTION: or DONE:.\n- Only use SOLUTION: <code> when the goal asks you to compute or verify something without creating a persistent file.\n- To run shell commands (npm install, go build, go test, pip install, pytest, cargo build, make): use the shell tool.\n- shell tool format: Action: shell\\nAction Input: {\"command\": \"<command>\"}\n- VERIFY BEFORE DONE: For Python tasks, after writing the file use shell tool to run it (e.g. Action: shell / Action Input: {\"command\":\"python3 filename.py\"}) and confirm the output contains the expected values from the goal. If output is wrong, fix the file and re-run. Only output DONE: after verification passes.",
 			UserPrompt:   prompt,
 		}
 
@@ -221,7 +230,7 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 			res, err := o.exec.RunPython(ctx, solCode)
 			if err != nil {
 				o.cli.PrintFailure(fmt.Sprintf("Execution Error: %v", err))
-				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: "Execution failed: " + err.Error()})
+				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Execution failed (exit %d):\nstdout: %s\nstderr: %s\nFix the code and try again.", res.ExitCode, res.Stdout, res.Stderr)})
 				continue
 			}
 
@@ -230,7 +239,7 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 			if !verdict.IsCorrect {
 				o.cli.PrintJudgeVerdict("rejected")
 				o.cli.PrintInfo(fmt.Sprintf("[debug] Judge feedback: %s", verdict.Feedback))
-				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: "Judge: " + verdict.Feedback})
+				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Code ran but judge rejected output.\nstdout: %s\nstderr: %s\nFeedback: %s\nFix the logic and try again.", res.Stdout, res.Stderr, verdict.Feedback)})
 				continue
 			}
 			
