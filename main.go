@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -49,7 +50,7 @@ func main() {
 	// Detect 'fix' subcommand before flag parsing
 	if len(os.Args) > 1 && os.Args[1] == "fix" {
 		fixMode = true
-		os.Args = append(os.Args[:1], os.Args[2:]...)
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 	}
 
 	configPath := flag.String("config", "", "Path to config file (default: ~/.swarm/config.json)")
@@ -79,8 +80,12 @@ func main() {
 	// fix mode: read stdin and build goal from compiler errors
 	if fixMode {
 		stdinBytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "swarm fix: failed to read stdin: %v\n", err)
+			os.Exit(1)
+		}
 		errorText := strings.TrimSpace(string(stdinBytes))
-		if err != nil || errorText == "" {
+		if errorText == "" {
 			fmt.Fprintln(os.Stderr, "swarm fix: no input on stdin. Usage: go build 2>&1 | swarm fix")
 			os.Exit(1)
 		}
@@ -214,14 +219,23 @@ func main() {
 	if err != nil {
 		cli.PrintFailure(fmt.Sprintf("Agent failed: %v", err))
 		if *jsonFlag {
-			fmt.Printf(`{"event": "error", "message": "%v"}\n`, err)
+			if b, _ := json.Marshal(err.Error()); b != nil {
+				fmt.Printf("{\"event\": \"error\", \"message\": %s}\n", b)
+			}
 		}
 		return
 	}
 
 	cli.PrintSuccess("Success! Final Solution:")
 	if *jsonFlag {
-		fmt.Printf(`{"event": "success", "solution": "%s", "workspace": "%s"}\n`, result, workspace.Root)
+		type successOut struct {
+			Event     string `json:"event"`
+			Solution  string `json:"solution"`
+			Workspace string `json:"workspace"`
+		}
+		if b, err := json.Marshal(successOut{"success", result, workspace.Root}); err == nil {
+			fmt.Println(string(b))
+		}
 	} else {
 		fmt.Printf("✅ Success! Final Solution:\n%s\n", result)
 		if files, err := workspace.ListFiles(); err == nil && len(files) > 0 {

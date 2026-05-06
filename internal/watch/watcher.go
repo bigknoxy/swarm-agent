@@ -7,22 +7,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
 
-// Watcher monitors a directory for source file changes and runs a build command.
-// When the build fails it calls FixFunc with the error output so the caller can invoke the agent.
 type Watcher struct {
 	Dir      string
-	BuildCmd string        // e.g. "go build ./..."
-	Exts     []string      // extensions to watch, e.g. [".go", ".ts", ".py"]
-	MaxFixes int           // max agent fix attempts per change event, default 3
+	BuildCmd string
+	Exts     []string
+	MaxFixes int
 	FixFunc  func(ctx context.Context, errorOutput string) error
+	fixing   atomic.Bool
 }
 
-// Run starts watching Dir until ctx is cancelled.
 func (w *Watcher) Run(ctx context.Context) error {
 	exts := w.Exts
 	if len(exts) == 0 {
@@ -39,7 +38,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 	defer watcher.Close()
 
-	// Walk dir and add all subdirectories
 	if err := filepath.Walk(w.Dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -64,7 +62,6 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			// Only react to write/create events for watched extensions
 			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
 				continue
 			}
@@ -79,11 +76,14 @@ func (w *Watcher) Run(ctx context.Context) error {
 				continue
 			}
 
-			// Debounce: reset timer on each event
 			if debounce != nil {
 				debounce.Stop()
 			}
 			debounce = time.AfterFunc(2*time.Second, func() {
+				if !w.fixing.CompareAndSwap(false, true) {
+					return
+				}
+				defer w.fixing.Store(false)
 				w.handleChange(ctx, maxFixes)
 			})
 		case err, ok := <-watcher.Errors:
@@ -96,7 +96,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 }
 
 func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
-	stdout, stderr, exitOK := w.runBuild()
+	stdout, stderr, exitOK := w.runBuild(ctx)
 	if exitOK {
 		fmt.Println("✅ Build OK")
 		return
@@ -110,8 +110,7 @@ func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
 			fmt.Fprintf(os.Stderr, "fix error: %v\n", err)
 			return
 		}
-		// Re-run build to check if fixed
-		_, _, exitOK = w.runBuild()
+		_, _, exitOK = w.runBuild(ctx)
 		if exitOK {
 			fmt.Printf("✅ Fixed in %d attempt(s)\n", attempt)
 			return
@@ -123,12 +122,8 @@ func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
 	fmt.Printf("❌ Could not fix after %d attempt(s)\n", maxFixes)
 }
 
-func (w *Watcher) runBuild() (stdout, stderr string, ok bool) {
-	parts := strings.Fields(w.BuildCmd)
-	if len(parts) == 0 {
-		return "", "", false
-	}
-	cmd := exec.Command(parts[0], parts[1:]...)
+func (w *Watcher) runBuild(ctx context.Context) (stdout, stderr string, ok bool) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", w.BuildCmd)
 	cmd.Dir = w.Dir
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf

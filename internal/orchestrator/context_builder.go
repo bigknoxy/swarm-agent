@@ -147,6 +147,10 @@ func BuildContext(goal, cwd string, exec *executor.Executor, ws *Workspace) (*Pr
 		}
 		relPath := strings.TrimPrefix(rel, "./")
 		if content, err := os.ReadFile(filepath.Join(cwd, relPath)); err == nil {
+			const maxFileBytes = 32 * 1024
+			if len(content) > maxFileBytes {
+				content = content[:maxFileBytes]
+			}
 			lines := strings.Split(string(content), "\n")
 			if len(lines) > 80 {
 				lines = lines[:80]
@@ -235,6 +239,8 @@ func ContextScanSummary(pc *ProjectContext) string {
 	if len(pc.RelevantFiles) == 0 {
 		return fmt.Sprintf("[Context] %d files scanned", len(pc.TopFiles))
 	}
-	firstKw := pc.Keywords[0]
-	return fmt.Sprintf("[Context] %d files, %d matches for '%s'", len(pc.TopFiles), len(pc.RelevantFiles), firstKw)
+	if len(pc.Keywords) == 0 {
+		return fmt.Sprintf("[Context] %d files, %d matches", len(pc.TopFiles), len(pc.RelevantFiles))
+	}
+	return fmt.Sprintf("[Context] %d files, %d matches for '%s'", len(pc.TopFiles), len(pc.RelevantFiles), pc.Keywords[0])
 }
