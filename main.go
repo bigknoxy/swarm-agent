@@ -71,7 +71,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if len(flag.Args()) == 0 && !fixMode {
+	if len(flag.Args()) == 0 && !fixMode && *watchFlag == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -79,11 +79,11 @@ func main() {
 	// fix mode: read stdin and build goal from compiler errors
 	if fixMode {
 		stdinBytes, err := io.ReadAll(os.Stdin)
-		if err != nil || len(stdinBytes) == 0 {
+		errorText := strings.TrimSpace(string(stdinBytes))
+		if err != nil || errorText == "" {
 			fmt.Fprintln(os.Stderr, "swarm fix: no input on stdin. Usage: go build 2>&1 | swarm fix")
 			os.Exit(1)
 		}
-		errorText := strings.TrimSpace(string(stdinBytes))
 
 		// Detect build tool from error format to add verification hint
 		verifyHint := ""
