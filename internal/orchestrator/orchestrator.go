@@ -99,6 +99,63 @@ func extractLTMKeywords(goal string) string {
 	return strings.Join(kws, " ")
 }
 
+// extractExpectedValues scans the goal for "Expected: <value>" patterns and
+// returns any quoted tokens or bracketed values it finds. Used to generate
+// targeted diff hints when execution output doesn't match expectations.
+func extractExpectedValues(goal string) []string {
+	var expected []string
+	lower := strings.ToLower(goal)
+	for _, marker := range []string{"expected:", "expected output:", "expected result:"} {
+		idx := strings.Index(lower, marker)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(goal[idx+len(marker):])
+		// Take up to 200 chars after the marker as the expected value hint
+		if len(rest) > 200 {
+			rest = rest[:200]
+		}
+		// Split on sentence-ending punctuation to avoid bleeding into next sentence
+		for _, sep := range []string{". ", "\n"} {
+			if i := strings.Index(rest, sep); i >= 0 {
+				rest = rest[:i]
+			}
+		}
+		rest = strings.TrimSpace(rest)
+		if rest != "" {
+			expected = append(expected, rest)
+		}
+	}
+	return expected
+}
+
+// buildOutputHint generates a hint when actual output is missing expected values from the goal.
+func buildOutputHint(goal, actualOutput string) string {
+	expected := extractExpectedValues(goal)
+	if len(expected) == 0 {
+		return ""
+	}
+	var missing []string
+	for _, exp := range expected {
+		// Check a few key tokens from the expected value
+		tokens := strings.Fields(exp)
+		for _, tok := range tokens {
+			tok = strings.Trim(tok, "\"'`(){},")
+			if len(tok) < 3 {
+				continue
+			}
+			if !strings.Contains(actualOutput, tok) {
+				missing = append(missing, tok)
+				break
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nHint: goal expects %q but those tokens are not in your output. Fix your logic.", strings.Join(missing, ", "))
+}
+
 func knowledgeManagerPath() string {
 	if p := os.Getenv("KNOWLEDGE_MANAGER_PATH"); p != "" {
 		if _, err := os.Stat(p); err == nil {
@@ -244,7 +301,8 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 			res, err := o.exec.RunPython(ctx, solCode)
 			if err != nil {
 				o.cli.PrintFailure(fmt.Sprintf("Execution Error: %v", err))
-				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Execution failed (exit %d):\nstdout: %s\nstderr: %s\nFix the code and try again.", res.ExitCode, res.Stdout, res.Stderr)})
+				hint := buildOutputHint(goal, res.Stdout+res.Stderr)
+				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Execution failed (exit %d):\nstdout: %s\nstderr: %s\nFix the code and try again.%s", res.ExitCode, res.Stdout, res.Stderr, hint)})
 				continue
 			}
 
@@ -253,7 +311,8 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 			if !verdict.IsCorrect {
 				o.cli.PrintJudgeVerdict("rejected")
 				o.cli.PrintInfo(fmt.Sprintf("[debug] Judge feedback: %s", verdict.Feedback))
-				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Code ran but judge rejected output.\nstdout: %s\nstderr: %s\nFeedback: %s\nFix the logic and try again.", res.Stdout, res.Stderr, verdict.Feedback)})
+				hint := buildOutputHint(goal, res.Stdout)
+				mem.ReActSteps = append(mem.ReActSteps, Step{Observation: fmt.Sprintf("Code ran but judge rejected output.\nstdout: %s\nstderr: %s\nFeedback: %s\nFix the logic and try again.%s", res.Stdout, res.Stderr, verdict.Feedback, hint)})
 				continue
 			}
 			
