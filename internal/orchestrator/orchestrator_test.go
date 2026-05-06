@@ -408,38 +408,21 @@ func TestKnowledgeManagerPath_NotFound(t *testing.T) {
 	_ = path
 }
 
-func TestGenerateLTMKeywords(t *testing.T) {
-	mockLLM := &MockLLM2{
-		Responses: []string{"python fibonacci"},
+func TestExtractLTMKeywords(t *testing.T) {
+	keywords := extractLTMKeywords("Write a fibonacci function")
+	if !strings.Contains(keywords, "fibonacci") {
+		t.Errorf("Expected 'fibonacci' in keywords, got %q", keywords)
 	}
-
-	orch := &Orchestrator{
-		llm: mockLLM,
-	}
-
-	ctx := context.Background()
-	keywords := orch.generateLTMKeywords(ctx, "Write a fibonacci function")
-
-	if keywords != "python fibonacci" {
-		t.Errorf("Expected 'python fibonacci', got %q", keywords)
+	if strings.Contains(keywords, "write") {
+		t.Errorf("Expected stop word 'write' to be filtered, got %q", keywords)
 	}
 }
 
-func TestGenerateLTMKeywords_LLMError(t *testing.T) {
-	mockLLM := &MockLLM2{
-		Error: context.Canceled,
-	}
-
-	orch := &Orchestrator{
-		llm: mockLLM,
-	}
-
-	ctx := context.Background()
-	keywords := orch.generateLTMKeywords(ctx, "goal")
-
-	// Should return goal on error
-	if keywords != "goal" {
-		t.Errorf("Expected 'goal' on error, got %q", keywords)
+func TestExtractLTMKeywords_ShortGoal(t *testing.T) {
+	keywords := extractLTMKeywords("go")
+	// Too short to extract anything meaningful — should fall back to goal
+	if keywords == "" {
+		t.Error("Expected non-empty result for short goal")
 	}
 }
 

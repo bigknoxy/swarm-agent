@@ -73,16 +73,30 @@ func (o *Orchestrator) RegisterTools(t ...agent.Tool) {
 	o.tools.Register(t...)
 }
 
-func (o *Orchestrator) generateLTMKeywords(ctx context.Context, goal string) string {
-	req := llm.Request{
-		SystemPrompt: "You are a Search Expert. Given a coding goal, output a short phrase (3-5 words) that would be a good key for searching a long-term memory database of architectural patterns. Output ONLY the phrase.",
-		UserPrompt:   goal,
+// extractLTMKeywords derives search terms from the goal without an LLM call.
+// Filters stop words and short tokens — same logic as BuildContext keyword extraction.
+func extractLTMKeywords(goal string) string {
+	stopWords := map[string]bool{
+		"a": true, "an": true, "the": true, "to": true, "for": true, "in": true, "of": true,
+		"that": true, "with": true, "and": true, "or": true, "is": true, "are": true,
+		"on": true, "at": true, "by": true, "from": true, "it": true, "its": true,
+		"this": true, "add": true, "make": true, "write": true, "create": true,
+		"fix": true, "update": true, "get": true, "set": true, "run": true, "use": true,
 	}
-	resp, err := o.llm.Generate(ctx, req)
-	if err != nil {
+	var kws []string
+	for _, w := range strings.Fields(goal) {
+		lower := strings.ToLower(strings.Trim(w, ".,;:!?\"'()"))
+		if len(lower) >= 4 && !stopWords[lower] {
+			kws = append(kws, lower)
+		}
+	}
+	if len(kws) == 0 {
 		return goal
 	}
-	return strings.TrimSpace(resp.Text)
+	if len(kws) > 5 {
+		kws = kws[:5]
+	}
+	return strings.Join(kws, " ")
 }
 
 func knowledgeManagerPath() string {
@@ -107,7 +121,7 @@ func (o *Orchestrator) queryLTM(ctx context.Context, goal string) string {
 	if kmPath == "" {
 		return ""
 	}
-	keywords := o.generateLTMKeywords(ctx, goal)
+	keywords := extractLTMKeywords(goal)
 	fmt.Printf("[LTM] Querying for: %s\n", keywords)
 	cmd := exec.CommandContext(ctx, "python3", kmPath, "query", keywords)
 	out, err := cmd.Output()
