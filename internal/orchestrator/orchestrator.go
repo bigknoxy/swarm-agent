@@ -43,9 +43,10 @@ type Orchestrator struct {
 	cli       CLI
 	jdg       judge.JudgeVerifier
 	workspace *Workspace
+	projectDir  string
 }
 
-func NewOrchestrator(l llm.Provider, e *executor.Executor, j judge.JudgeVerifier, w *Workspace, cfg Config, cli CLI) *Orchestrator {
+func NewOrchestrator(l llm.Provider, e *executor.Executor, j judge.JudgeVerifier, w *Workspace, projectDir string, cfg Config, cli CLI) *Orchestrator {
 	// Initialize ToolManager and Register Built-in Tools for the ReAct pattern
 	tm := agent.NewToolManager()
 	tm.Register(
@@ -62,6 +63,7 @@ func NewOrchestrator(l llm.Provider, e *executor.Executor, j judge.JudgeVerifier
 		config:    cfg,
 		cli:       cli,
 		workspace: w,
+		projectDir: projectDir,
 	}
 }
 
@@ -206,7 +208,7 @@ func (o *Orchestrator) SolveReAct(ctx context.Context, goal string) (string, err
 	}
 
 	// Build project context once before the loop — git status, file structure, relevant files, top file snippet
-	projCtx, _ := BuildContext(goal, o.workspace.Root, o.exec, o.workspace)
+	projCtx, _ := BuildContext(goal, o.projectDir, o.exec, o.workspace)
 	if summary := ContextScanSummary(projCtx); summary != "" {
 		o.cli.PrintInfo(summary)
 	}

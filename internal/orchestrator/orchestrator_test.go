@@ -63,7 +63,7 @@ func TestNewOrchestrator(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Minute)
 	cfg := Config{MaxAttempts: 5, Timeout: 5 * time.Minute}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	if orch == nil {
 		t.Fatal("Expected non-nil Orchestrator")
@@ -79,7 +79,7 @@ func TestOrchestrator_RegisterTool(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Minute)
 	cfg := Config{MaxAttempts: 5, Timeout: 5 * time.Minute}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	// Register a tool
 	tool := &MockTool{name: "test_tool"}
@@ -98,7 +98,7 @@ func TestOrchestrator_RegisterTools(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Minute)
 	cfg := Config{MaxAttempts: 5, Timeout: 5 * time.Minute}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	// Register multiple tools directly
 	orch.RegisterTools(&MockTool{name: "tool1"}, &MockTool{name: "tool2"})
@@ -137,7 +137,7 @@ func TestOrchestrator_SolveReAct_GoldenPath(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "print hello")
@@ -161,7 +161,7 @@ func TestOrchestrator_SolveReAct_MaxAttempts(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 3, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveReAct(ctx, "goal")
@@ -192,7 +192,7 @@ func TestOrchestrator_SolveTDD_GoldenPath(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveTDD(ctx, "Implement add function")
@@ -213,7 +213,7 @@ func TestSolveTDD_ContextCancelled(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Second)
 	cfg := Config{MaxAttempts: 10, Timeout: 5 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -246,7 +246,7 @@ func TestSolveTDD_ReflectorCalled(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second} // Only 1 attempt
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveTDD(ctx, "Implement add")
@@ -490,7 +490,7 @@ func TestSolveReAct_LLMError(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveReAct(ctx, "goal")
@@ -516,7 +516,7 @@ func TestSolveReAct_ToolCallMissingInput(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "goal")
@@ -544,7 +544,7 @@ func TestSolveReAct_ToolExecutionError(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 	orch.RegisterTool(mockTool)
 
 	ctx := context.Background()
@@ -571,7 +571,7 @@ func TestSolveReAct_FallbackNoSolutionNoAction(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "goal")
@@ -739,7 +739,7 @@ func TestSolveReAct_DONEEmptyWorkspace(t *testing.T) {
 	mockJudge := &MockJudge2{Verdict: judge.Verdict{IsCorrect: true, Feedback: "ok"}}
 	workspace := NewWorkspaceWithPath(t.TempDir())
 	exec := executor.NewExecutor(5 * time.Minute)
-	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
+	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
 
 	sol, err := o.SolveReAct(context.Background(), "test task")
 	if err != nil {
@@ -758,7 +758,7 @@ func TestSolveReAct_MultiAttemptFallback(t *testing.T) {
 	mockJudge := &MockJudge2{Verdict: judge.Verdict{IsCorrect: true, Feedback: "ok"}}
 	workspace := NewWorkspaceWithPath(t.TempDir())
 	exec := executor.NewExecutor(5 * time.Minute)
-	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
+	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
 
 	sol, err := o.SolveReAct(context.Background(), "test task")
 	if err != nil {
@@ -777,7 +777,7 @@ func TestSolveReAct_ToolCallContinuesLoop(t *testing.T) {
 	mockJudge := &MockJudge2{Verdict: judge.Verdict{IsCorrect: true, Feedback: "ok"}}
 	workspace := NewWorkspaceWithPath(t.TempDir())
 	exec := executor.NewExecutor(5 * time.Minute)
-	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
+	o := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", Config{MaxAttempts: 3, Timeout: 5 * time.Minute}, &MockCLI{})
 
 	sol, err := o.SolveReAct(context.Background(), "test task")
 	if err != nil {
@@ -815,7 +815,7 @@ func TestSolveReAct_JudgeRejectsSolution(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Second)
 	workspace := NewWorkspaceWithPath(t.TempDir())
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, Config{MaxAttempts: 5, Timeout: 5 * time.Second}, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", Config{MaxAttempts: 5, Timeout: 5 * time.Second}, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "test goal")
@@ -843,7 +843,7 @@ func TestSolveReAct_ExecutionErrorContinues(t *testing.T) {
 	workspace := NewWorkspaceWithPath(t.TempDir())
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, execJudge, workspace, cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, execJudge, workspace, "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "write code")
@@ -870,7 +870,7 @@ func TestSolveReAct_DONEWithFilesSucceeds(t *testing.T) {
 	exec := executor.NewExecutor(5 * time.Second)
 	cfg := Config{MaxAttempts: 5, Timeout: 5 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	result, err := orch.SolveReAct(ctx, "write html")
@@ -900,7 +900,7 @@ func TestSolveReAct_LTMInjected(t *testing.T) {
 	workspace := NewWorkspaceWithPath(t.TempDir())
 	cfg := Config{MaxAttempts: 5, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, workspace, "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveReAct(ctx, "write code")
@@ -920,7 +920,7 @@ func TestSolveTDD_TestGenError(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 3, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveTDD(ctx, "Implement add")
@@ -954,7 +954,7 @@ func TestSolveTDD_ArchitectError(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveTDD(ctx, "Implement add")
@@ -984,7 +984,7 @@ func TestSolveTDD_MaxAttemptsExceeded(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveTDD(ctx, "Implement add")
@@ -1014,7 +1014,7 @@ func TestSolveTDD_OracleFaultPath(t *testing.T) {
 	exec := executor.NewExecutor(3 * time.Second)
 	cfg := Config{MaxAttempts: 1, Timeout: 3 * time.Second}
 
-	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), cfg, &MockCLI{})
+	orch := NewOrchestrator(mockLLM, exec, mockJudge, NewWorkspace(), "", cfg, &MockCLI{})
 
 	ctx := context.Background()
 	_, err := orch.SolveTDD(ctx, "Implement add")

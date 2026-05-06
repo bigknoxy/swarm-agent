@@ -24,6 +24,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  swarm \"write fibonacci.py and verify it works\"\n")
 		fmt.Fprintf(os.Stderr, "  swarm --role architect \"design a rate-limiting system\"\n")
 		fmt.Fprintf(os.Stderr, "  swarm --role developer --verbose \"implement the auth module\"\n")
+		fmt.Fprintf(os.Stderr, "  swarm --project /path/to/repo \"refactor the auth module\"\n")
 		fmt.Fprintf(os.Stderr, "  swarm --json \"write hello.py\" | jq .\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
@@ -34,6 +35,7 @@ func main() {
 	roleFlag := flag.String("role", "", "Override role (architect, developer, utility)")
 	timeoutFlag := flag.Duration("timeout", 0, "Override timeout (e.g., 5m)")
 	workspaceFlag := flag.String("workspace", "", "Override workspace path")
+	projectFlag := flag.String("project", "", "Project directory to scan for context (default: current directory)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	verboseFlag := flag.Bool("verbose", false, "Show full LLM prompts/responses")
 	jsonFlag := flag.Bool("json", false, "Machine-readable JSON output")
@@ -71,6 +73,13 @@ func main() {
 		cfg.Workspace = *workspaceFlag
 	}
 
+	projectDir := *projectFlag
+	if projectDir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			projectDir = cwd
+		}
+	}
+
 	// Setup
 	exec := executor.NewExecutor(cfg.Timeout)
 	j := judge.NewJudge()
@@ -89,7 +98,7 @@ func main() {
 	llmClient := llm.NewClient(llm.NewOllamaProvider(cfg.OlamaURL, cfg.DefaultModel))
 
 	// Create orchestrator
-	orch := orchestrator.NewOrchestrator(llmClient, exec, j, workspace, orchCfg, cli)
+	orch := orchestrator.NewOrchestrator(llmClient, exec, j, workspace, projectDir, orchCfg, cli)
 	orch.RegisterTool(fileTool)
 	orch.RegisterTool(shellTool)
 
