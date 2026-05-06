@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"agent_loop/internal/config"
@@ -15,6 +18,7 @@ import (
 	"agent_loop/internal/llm"
 	"agent_loop/internal/orchestrator"
 	"agent_loop/internal/roles"
+	"agent_loop/internal/watch"
 )
 
 
@@ -32,6 +36,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  go build ./... 2>&1 | swarm fix\n")
 		fmt.Fprintf(os.Stderr, "  npm run build 2>&1 | swarm fix\n")
 		fmt.Fprintf(os.Stderr, "  swarm fix < errors.txt\n\n")
+		fmt.Fprintf(os.Stderr, "Watch mode (auto-fix on save):\n")
+		fmt.Fprintf(os.Stderr, "  swarm --watch src/\n")
+		fmt.Fprintf(os.Stderr, "  swarm --watch . --build-cmd \"go build ./...\"\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -51,6 +58,8 @@ func main() {
 	timeoutFlag := flag.Duration("timeout", 0, "Override timeout (e.g., 5m)")
 	workspaceFlag := flag.String("workspace", "", "Override workspace path")
 	projectFlag := flag.String("project", "", "Project directory to scan for context (default: current directory)")
+	watchFlag := flag.String("watch", "", "Directory to watch for changes and auto-fix on build failure")
+	buildCmd := flag.String("build-cmd", "", "Build command to run in watch mode (default: auto-detected)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	verboseFlag := flag.Bool("verbose", false, "Show full LLM prompts/responses")
 	jsonFlag := flag.Bool("json", false, "Machine-readable JSON output")
@@ -148,6 +157,36 @@ func main() {
 	orch := orchestrator.NewOrchestrator(llmClient, exec, j, workspace, projectDir, orchCfg, cli)
 	orch.RegisterTool(fileTool)
 	orch.RegisterTool(shellTool)
+
+	// Watch mode
+	if *watchFlag != "" {
+		watchDir := *watchFlag
+		if !filepath.IsAbs(watchDir) {
+			if cwd, err := os.Getwd(); err == nil {
+				watchDir = filepath.Join(cwd, watchDir)
+			}
+		}
+		cmd := *buildCmd
+		if cmd == "" {
+			cmd = watch.DetectBuildCmd(watchDir)
+		}
+		w := &watch.Watcher{
+			Dir:      watchDir,
+			BuildCmd: cmd,
+			FixFunc: func(ctx context.Context, errorOutput string) error {
+				fixGoal := "Fix these build/compiler errors in the source files:\n\n" + errorOutput + "\n\nFix the errors in the relevant source files."
+				_, err := orch.SolveReAct(ctx, fixGoal)
+				return err
+			},
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := w.Run(ctx); err != nil {
+			cli.PrintFailure(fmt.Sprintf("Watch error: %v", err))
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	var goal string
 	if fixMode {
