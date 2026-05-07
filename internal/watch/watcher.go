@@ -62,7 +62,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue
 			}
 			matched := false
@@ -95,7 +95,15 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 }
 
+const maxErrorBytes = 8192
+
 func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "watch: panic in FixFunc: %v\n", r)
+		}
+	}()
+
 	stdout, stderr, exitOK := w.runBuild(ctx)
 	if exitOK {
 		fmt.Println("✅ Build OK")
@@ -103,6 +111,9 @@ func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
 	}
 
 	errorOutput := strings.TrimSpace(stdout + "\n" + stderr)
+	if len(errorOutput) > maxErrorBytes {
+		errorOutput = errorOutput[:maxErrorBytes] + "\n[truncated]"
+	}
 	fmt.Printf("❌ Build failed — invoking agent fix (attempt 1/%d)\n", maxFixes)
 
 	for attempt := 1; attempt <= maxFixes; attempt++ {
@@ -110,10 +121,17 @@ func (w *Watcher) handleChange(ctx context.Context, maxFixes int) {
 			fmt.Fprintf(os.Stderr, "fix error: %v\n", err)
 			return
 		}
-		_, _, exitOK = w.runBuild(ctx)
+		var newStdout, newStderr string
+		newStdout, newStderr, exitOK = w.runBuild(ctx)
 		if exitOK {
 			fmt.Printf("✅ Fixed in %d attempt(s)\n", attempt)
+			w.logLTM(attempt, errorOutput)
 			return
+		}
+		// Re-capture latest error so next retry gets fresh context
+		errorOutput = strings.TrimSpace(newStdout + "\n" + newStderr)
+		if len(errorOutput) > maxErrorBytes {
+			errorOutput = errorOutput[:maxErrorBytes] + "\n[truncated]"
 		}
 		if attempt < maxFixes {
 			fmt.Printf("⚠️  Still failing — retrying (attempt %d/%d)\n", attempt+1, maxFixes)
@@ -130,6 +148,41 @@ func (w *Watcher) runBuild(ctx context.Context) (stdout, stderr string, ok bool)
 	cmd.Stderr = &errBuf
 	err := cmd.Run()
 	return outBuf.String(), errBuf.String(), err == nil
+}
+
+func (w *Watcher) logLTM(attempts int, errorSnippet string) {
+	if len(errorSnippet) > 200 {
+		errorSnippet = errorSnippet[:200]
+	}
+	msg := fmt.Sprintf("watch-fix: %s fixed after %d attempt(s). Error snippet: %s", w.BuildCmd, attempts, errorSnippet)
+
+	// Resolve knowledge_manager.py: SWARM_HOME env var, then binary-relative path.
+	kmPath := ""
+	if home := os.Getenv("SWARM_HOME"); home != "" {
+		candidate := filepath.Join(home, "knowledge_manager.py")
+		if _, err := os.Stat(candidate); err == nil {
+			kmPath = candidate
+		}
+	}
+	if kmPath == "" {
+		if exe, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "knowledge_manager.py")
+			if _, err := os.Stat(candidate); err == nil {
+				kmPath = candidate
+			}
+		}
+	}
+	if kmPath == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "python3", kmPath, "log", msg)
+	cmd.Dir = filepath.Dir(kmPath)
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "watch: LTM log failed: %v\n", err)
+	}
 }
 
 // DetectBuildCmd returns a sensible default build command for the project in dir.

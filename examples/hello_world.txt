@@ -1,0 +1,1 @@
+Write a simple "Hello, World!" program in Go. The program should print "Hello, World!" to stdout. Verify it compiles and runs correctly.

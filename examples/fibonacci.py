@@ -1,0 +1,1 @@
+Write a Python file named 'fibonacci.py' that contains the 'fibonacci' function. The function should take an integer n and return the nth fibonacci number (0-indexed: fib(0)=0, fib(1)=1). Then, verify it works for n=10 (expected: 55) and n=0 (expected: 0). Persist the code to the workspace.

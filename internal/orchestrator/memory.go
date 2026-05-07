@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"agent_loop/internal/agent"
 )
 
 type Step struct {
@@ -22,10 +24,12 @@ type Hypothesis struct {
 }
 
 type SessionMemory struct {
-	Goal       string
-	ReActSteps []Step     // History of the ReAct loop
-	Lessons    []string   // High-level insights (e.g. "Tool X failed on empty input")
-	Hypotheses []Hypothesis
+	Goal               string
+	ReActSteps         []Step     // History of the ReAct loop
+	Lessons            []string   // High-level insights (e.g. "Tool X failed on empty input")
+	Hypotheses         []Hypothesis
+	RegisteredTools    []agent.Tool
+	TestCode           string
 }
 
 // SetGoal updates the current goal (useful if the agent refines the goal).
@@ -60,9 +64,10 @@ func (m *SessionMemory) FormatTimestamp() string {
 
 func NewSessionMemory(goal string) *SessionMemory {
 	return &SessionMemory{
-		Goal:       goal,
-		Hypotheses: []Hypothesis{},
-		Lessons:    []string{},
+		Goal:               goal,
+		Hypotheses:         []Hypothesis{},
+		Lessons:            []string{},
+		RegisteredTools:    []agent.Tool{},
 	}
 }
 
@@ -82,6 +87,11 @@ func (m *SessionMemory) UpdateHypothesis(index int, status, outcome string) {
 
 func (m *SessionMemory) AddLesson(lesson string) {
 	m.Lessons = append(m.Lessons, lesson)
+}
+
+// AddTool registers a new tool.
+func (m *SessionMemory) AddTool(t agent.Tool) {
+	m.RegisteredTools = append(m.RegisteredTools, t)
 }
 
 func (m *SessionMemory) GetLog() string {

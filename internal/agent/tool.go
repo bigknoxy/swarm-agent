@@ -61,7 +61,7 @@ func (r *PythonREPL) Description() string {
 }
 
 func (r *PythonREPL) Execute(ctx context.Context, input string) (string, error) {
-	res, err := r.Executor.RunPython(input)
+	res, err := r.Executor.RunPython(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -89,7 +89,7 @@ func (t *PerformanceChecker) Description() string {
 func (t *PerformanceChecker) Execute(ctx context.Context, input string) (string, error) {
 	// Wrap the input in a timing script
 	wrapper := fmt.Sprintf("import time; s=time.time(); %s; print('TIME:', time.time()-s, 's')\n", input)
-	res, err := t.Executor.RunPython(wrapper)
+	res, err := t.Executor.RunPython(ctx, wrapper)
 	if err != nil {
 		return "", err
 	}

@@ -11,10 +11,10 @@ import (
 )
 
 type Reflector struct {
-	client *llm.Client
+	client llm.Provider
 }
 
-func NewReflector(client *llm.Client) *Reflector {
+func NewReflector(client llm.Provider) *Reflector {
 	return &Reflector{client: client}
 }
 

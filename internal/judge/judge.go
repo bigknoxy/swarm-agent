@@ -14,6 +14,7 @@ type Expectation struct {
 
 // Verdict represents the outcome of the judgment.
 type Verdict struct {
+	Fault    string
 	IsCorrect    bool
 	Feedback     string
 	ValueMismatch *ValueMismatch // Present if an assertion error occurred
@@ -27,6 +28,11 @@ type ValueMismatch struct {
 }
 
 // Judge analyzes the executor result against the expectations.
+type JudgeVerifier interface {
+	Evaluate(res *executor.Result, exp Expectation) Verdict
+	EvaluateTDD(res *executor.Result) Verdict
+}
+
 type Judge struct{}
 
 func NewJudge() *Judge {
