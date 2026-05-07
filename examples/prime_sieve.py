@@ -1,0 +1,1 @@
+Write a Python function that implements the Sieve of Eratosthenes to find all prime numbers up to n. The function should be named 'prime_sieve' and take an integer n as input, returning a list of primes up to n. Performance check: it should find all primes up to 1,000,000 in under 1 second. Use the PerformanceChecker tool to verify.

@@ -54,6 +54,10 @@ func (w *Workspace) Path(filename string) string {
 // WriteFile safely writes content to the workspace
 func (w *Workspace) WriteFile(filename string, content string) error {
 	path := w.Path(filename)
+	rel, err := filepath.Rel(w.Root, path)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return fmt.Errorf("workspace: path %q escapes workspace root", filename)
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("workspace mkdir failed: %w", err)
@@ -64,6 +68,10 @@ func (w *Workspace) WriteFile(filename string, content string) error {
 // ReadFile safely reads content from the workspace
 func (w *Workspace) ReadFile(filename string) (string, error) {
 	path := w.Path(filename)
+	rel, err := filepath.Rel(w.Root, path)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("workspace: path %q escapes workspace root", filename)
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("workspace read failed: %w", err)

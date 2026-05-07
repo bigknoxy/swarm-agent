@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -22,6 +22,94 @@ import (
 	"agent_loop/internal/watch"
 )
 
+// runFixMode handles fix mode: reads stdin errors and invokes agent to fix them
+func runFixMode(cli *CLIOutput, cfg *config.Config, orch *orchestrator.Orchestrator, fixGoal string) {
+	cli.PrintStart(fixGoal)
+
+	ctx := context.Background()
+	result, err := orch.SolveReAct(ctx, fixGoal)
+	if err != nil {
+		cli.PrintFailure(fmt.Sprintf("Agent failed: %v", err))
+		return
+	}
+
+	cli.PrintSuccess("Success! Errors fixed.")
+
+	// Run git diff --stat to show what changed
+	cmd := exec.Command("git", "diff", "--stat", "HEAD")
+	cmd.Dir = cfg.Workspace
+	out, err := cmd.Output()
+	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		fmt.Printf("📝 Changes:\n%s\n", strings.TrimSpace(string(out)))
+	}
+
+	if len(result) > 0 {
+		fmt.Printf("✅ Final Solution:\n%s\n", result)
+	}
+}
+
+// runWatchMode handles watch mode: monitors directory and auto-fixes build failures
+func runWatchMode(cli *CLIOutput, orch *orchestrator.Orchestrator, watchDir string, buildCmd string) {
+	if !filepath.IsAbs(watchDir) {
+		if cwd, err := os.Getwd(); err == nil {
+			watchDir = filepath.Join(cwd, watchDir)
+		}
+	}
+	cmd := buildCmd
+	if cmd == "" {
+		cmd = watch.DetectBuildCmd(watchDir)
+	}
+	w := &watch.Watcher{
+		Dir:      watchDir,
+		BuildCmd: cmd,
+		FixFunc: func(ctx context.Context, errorOutput string) error {
+			fixGoal := "Fix these build/compiler errors in the source files:\n\n" + errorOutput + "\n\nFix the errors in the relevant source files."
+			_, err := orch.SolveReAct(ctx, fixGoal)
+			return err
+		},
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := w.Run(ctx); err != nil {
+		cli.PrintFailure(fmt.Sprintf("Watch error: %v", err))
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// runNormalMode handles normal agent mode: executes goal with optional role
+func runNormalMode(cli *CLIOutput, orch *orchestrator.Orchestrator, workspace *orchestrator.Workspace, goal string, roleFlag string) {
+	if roleFlag != "" {
+		roleCfg, err := roles.GetRoleConfig(roleFlag)
+		if err != nil {
+			cli.PrintFailure(fmt.Sprintf("Error: %v", err))
+			os.Exit(1)
+		}
+		cli.PrintStart(fmt.Sprintf("[Role: %s] %s", roleCfg.Name, goal))
+	} else {
+		cli.PrintStart(goal)
+	}
+
+	ctx := context.Background()
+	result, err := orch.SolveReAct(ctx, goal)
+	if err != nil {
+		cli.PrintFailure(fmt.Sprintf("Agent failed: %v", err))
+		return
+	}
+
+	cli.PrintSuccess("Success! Final Solution:")
+	if len(result) > 0 {
+		fmt.Printf("%s\n", result)
+		if files, err := workspace.ListFiles(); err == nil && len(files) > 0 {
+			fmt.Printf("✅ Files in workspace (%s):\n", workspace.Root)
+			for _, f := range files {
+				if f != "session_memory.json" {
+					fmt.Printf("   %s\n", f)
+				}
+			}
+		}
+	}
+}
 
 func main() {
 	flag.Usage = func() {
@@ -40,6 +128,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Watch mode (auto-fix on save):\n")
 		fmt.Fprintf(os.Stderr, "  swarm --watch src/\n")
 		fmt.Fprintf(os.Stderr, "  swarm --watch . --build-cmd \"go build ./...\"\n\n")
+		fmt.Fprintf(os.Stderr, "Status mode:\n")
+		fmt.Fprintf(os.Stderr, "  swarm status\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -51,6 +141,23 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "fix" {
 		fixMode = true
 		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	}
+
+	// Detect 'status' subcommand before flag parsing
+	if len(os.Args) > 1 && os.Args[1] == "status" {
+		projectDir := ""
+		if cwd, err := os.Getwd(); err == nil {
+			projectDir = cwd
+		}
+		runner := executor.NewExecutor(5 * time.Minute)
+		workspace := orchestrator.NewWorkspaceWithPath("")
+		pc, err := orchestrator.BuildContext("", projectDir, runner, workspace)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "status error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(pc.Format())
+		os.Exit(0)
 	}
 
 	configPath := flag.String("config", "", "Path to config file (default: ~/.swarm/config.json)")
@@ -88,6 +195,10 @@ func main() {
 		if errorText == "" {
 			fmt.Fprintln(os.Stderr, "swarm fix: no input on stdin. Usage: go build 2>&1 | swarm fix")
 			os.Exit(1)
+		}
+		const maxErrorBytes = 8192
+		if len(errorText) > maxErrorBytes {
+			errorText = errorText[:maxErrorBytes] + "\n[truncated]"
 		}
 
 		// Detect build tool from error format to add verification hint
@@ -142,7 +253,7 @@ func main() {
 	}
 
 	// Setup
-	exec := executor.NewExecutor(cfg.Timeout)
+	runner := executor.NewExecutor(cfg.Timeout)
 	j := judge.NewJudge()
 	workspace := orchestrator.NewWorkspaceWithPath(cfg.Workspace)
 	fileTool := &orchestrator.FileTool{Workspace: workspace}
@@ -150,7 +261,7 @@ func main() {
 	if shellTimeout == 0 {
 		shellTimeout = 5 * time.Minute
 	}
-	shellTool := orchestrator.NewShellTool(exec, workspace, shellTimeout)
+	shellTool := orchestrator.NewShellTool(runner, workspace, shellTimeout)
 
 	// Config for orchestrator
 	orchCfg := orchestrator.Config{MaxAttempts: cfg.MaxAttempts, Timeout: cfg.Timeout}
@@ -159,38 +270,14 @@ func main() {
 	llmClient := llm.NewClient(llm.NewOllamaProvider(cfg.OlamaURL, cfg.DefaultModel))
 
 	// Create orchestrator
-	orch := orchestrator.NewOrchestrator(llmClient, exec, j, workspace, projectDir, orchCfg, cli)
+	orch := orchestrator.NewOrchestrator(llmClient, runner, j, workspace, projectDir, orchCfg, cli)
 	orch.RegisterTool(fileTool)
 	orch.RegisterTool(shellTool)
 
 	// Watch mode
 	if *watchFlag != "" {
-		watchDir := *watchFlag
-		if !filepath.IsAbs(watchDir) {
-			if cwd, err := os.Getwd(); err == nil {
-				watchDir = filepath.Join(cwd, watchDir)
-			}
-		}
-		cmd := *buildCmd
-		if cmd == "" {
-			cmd = watch.DetectBuildCmd(watchDir)
-		}
-		w := &watch.Watcher{
-			Dir:      watchDir,
-			BuildCmd: cmd,
-			FixFunc: func(ctx context.Context, errorOutput string) error {
-				fixGoal := "Fix these build/compiler errors in the source files:\n\n" + errorOutput + "\n\nFix the errors in the relevant source files."
-				_, err := orch.SolveReAct(ctx, fixGoal)
-				return err
-			},
-		}
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer stop()
-		if err := w.Run(ctx); err != nil {
-			cli.PrintFailure(fmt.Sprintf("Watch error: %v", err))
-			os.Exit(1)
-		}
-		os.Exit(0)
+		runWatchMode(cli, orch, *watchFlag, *buildCmd)
+		return
 	}
 
 	var goal string
@@ -200,51 +287,12 @@ func main() {
 		goal = flag.Args()[0]
 	}
 
-	if *roleFlag != "" {
-		roleCfg, err := roles.GetRoleConfig(*roleFlag)
-		if err != nil {
-			cli.PrintFailure(fmt.Sprintf("Error: %v", err))
-			os.Exit(1)
-		}
-		// You can extend this to pass prompt/temp to LLM client or Orchestrator
-		// For now, we use it as a way to verify the role system is working.
-		cli.PrintStart(fmt.Sprintf("[Role: %s] %s", roleCfg.Name, goal))
-	} else {
-		cli.PrintStart(goal)
-	}
-
-	// Execute ReAct Loop
-	ctx := context.Background()
-	result, err := orch.SolveReAct(ctx, goal)
-	if err != nil {
-		cli.PrintFailure(fmt.Sprintf("Agent failed: %v", err))
-		if *jsonFlag {
-			if b, _ := json.Marshal(err.Error()); b != nil {
-				fmt.Printf("{\"event\": \"error\", \"message\": %s}\n", b)
-			}
-		}
+	// Fix mode
+	if fixMode {
+		runFixMode(cli, cfg, orch, goal)
 		return
 	}
 
-	cli.PrintSuccess("Success! Final Solution:")
-	if *jsonFlag {
-		type successOut struct {
-			Event     string `json:"event"`
-			Solution  string `json:"solution"`
-			Workspace string `json:"workspace"`
-		}
-		if b, err := json.Marshal(successOut{"success", result, workspace.Root}); err == nil {
-			fmt.Println(string(b))
-		}
-	} else {
-		fmt.Printf("✅ Success! Final Solution:\n%s\n", result)
-		if files, err := workspace.ListFiles(); err == nil && len(files) > 0 {
-			fmt.Printf("✅ Files in workspace (%s):\n", workspace.Root)
-			for _, f := range files {
-				if f != "session_memory.json" {
-					fmt.Printf("   %s\n", f)
-				}
-			}
-		}
-	}
+	// Normal mode
+	runNormalMode(cli, orch, workspace, goal, *roleFlag)
 }

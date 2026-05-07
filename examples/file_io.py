@@ -1,0 +1,1 @@
+Write a Python script that creates a file named 'data.txt' in the workspace with the content "Hello from Swarm!". Then read the file back and verify the content is correct. Use the FileTool for all file operations.
