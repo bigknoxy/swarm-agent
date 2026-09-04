@@ -1,6 +1,6 @@
 module agent_loop
 
-go 1.26.2
+go 1.26.6
 
 require (
 	github.com/fatih/color v1.19.0 // indirect
